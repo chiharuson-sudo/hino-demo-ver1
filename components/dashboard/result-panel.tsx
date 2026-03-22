@@ -15,6 +15,7 @@ export interface TriageResult {
   recommendedAction: string
   engineeringGroup: string
   confidence: number
+  dtcCodes?: string[]
 }
 
 interface ResultPanelProps {
