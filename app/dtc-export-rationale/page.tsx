@@ -9,6 +9,9 @@ import {
   EXPORT_MATRIX_COMPONENTS,
 } from "@/lib/dtc-export-rationale"
 
+/** 全件HTMLが約32MBとなり、静的プリレンダーは Vercel の ISR 上限（約19MB）を超えるため */
+export const dynamic = "force-dynamic"
+
 export const metadata = {
   title: "DTC振り分け根拠一覧 | HQA",
   description: "Excelエクスポートと同内容のDTC振り分け根拠・マトリクス",
