@@ -201,15 +201,19 @@ export function getPriority(dtc: string): string {
   return dtc === "2A0408" ? "高" : dtc ? "中" : "低"
 }
 
-/** 根拠マトリクス・行の背景色（優先度: 新規判断 > 複数絞り込み > 確信度低） */
-export type RationaleTone = "new" | "narrowed" | "low" | "neutral"
+/** 根拠マトリクス・行の背景色 */
+export type RationaleTone =
+  | "new"
+  | "narrowed"
+  | "low"
+  | "neutral"
+  /** 元データでDTCなし → テキスト推定で代表DTCを付与した行・セル */
+  | "inferred"
 
 export function getRationaleTone(c: HQACase): RationaleTone {
   const sel = selectPrimaryDTC(c)
   if (c.dtc_codes.length === 0) {
-    if (sel.rule === "テキスト推定ルール") {
-      return sel.confidence === "低" ? "low" : "neutral"
-    }
+    if (sel.rule === "テキスト推定ルール") return "inferred"
     return "new"
   }
   if (c.dtc_codes.length > 1) return "narrowed"
@@ -219,12 +223,13 @@ export function getRationaleTone(c: HQACase): RationaleTone {
 
 const TONE_RANK: Record<RationaleTone, number> = {
   neutral: 0,
-  low: 1,
-  narrowed: 2,
-  new: 3,
+  inferred: 1,
+  low: 2,
+  narrowed: 3,
+  new: 4,
 }
 
-/** セル内の複数件から、最も強いトーンを採用（混在時は赤 > 橙 > 黄） */
+/** セル内の複数件から、最も強いトーンを採用（混在時は赤 > 橙 > 黄 > 青(推定) > 白） */
 export function aggregateCellTone(casesInCell: HQACase[]): RationaleTone {
   if (casesInCell.length === 0) return "neutral"
   let best: RationaleTone = "neutral"

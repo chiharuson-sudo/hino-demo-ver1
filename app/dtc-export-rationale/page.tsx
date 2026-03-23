@@ -27,6 +27,8 @@ function matrixCellToneClass(tone: RationaleTone, cnt: number): string {
       return "bg-orange-100 font-medium text-orange-950"
     case "low":
       return "bg-yellow-100 font-medium text-yellow-950"
+    case "inferred":
+      return "bg-sky-100 font-medium text-sky-950"
     default:
       return "bg-white text-zinc-900"
   }
@@ -40,6 +42,8 @@ function rowToneClass(tone: RationaleTone): string {
       return "bg-orange-50/95"
     case "low":
       return "bg-yellow-50/95"
+    case "inferred":
+      return "bg-sky-50/95"
     default:
       return "bg-white"
   }
@@ -53,6 +57,8 @@ function stickyToneBg(tone: RationaleTone): string {
       return "bg-orange-50"
     case "low":
       return "bg-yellow-50"
+    case "inferred":
+      return "bg-sky-50"
     default:
       return "bg-white"
   }
@@ -96,7 +102,11 @@ export default function DtcExportRationalePage() {
             <span className="font-semibold text-zinc-700">{"色の意味（セル内に該当する事例の最優先トーン）:"}</span>
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-3 w-5 rounded-sm bg-red-100 ring-1 ring-red-200" />
-              {"DTCなし・テキストから判断（赤）"}
+              {"DTC未登録・推定不可など（赤）"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded-sm bg-sky-100 ring-1 ring-sky-200" />
+              {"DTCなし→テキスト推定で選択（青）"}
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-3 w-5 rounded-sm bg-orange-100 ring-1 ring-orange-200" />
@@ -187,7 +197,7 @@ export default function DtcExportRationalePage() {
           </h2>
           <p className="mb-2 text-xs text-zinc-500">
             {
-              "行の背景色はマトリクスと同じ基準です（赤: DTCなし、橙: 複数DTCから選択、黄: 確信度低）。"
+              "行の背景色はマトリクスと同じ基準です（青: DTCなしをテキスト推定で補完、赤: 未登録、橙: 複数から絞り込み、黄: 確信度低）。"
             }
           </p>
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">

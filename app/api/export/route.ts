@@ -21,6 +21,8 @@ function excelFillForTone(t: RationaleTone): { argb: string } | null {
       return { argb: "FFFFE0B2" }
     case "low":
       return { argb: "FFFFF9C4" }
+    case "inferred":
+      return { argb: "FFE0F2FE" }
     default:
       return null
   }
