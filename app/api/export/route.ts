@@ -324,12 +324,15 @@ export async function GET() {
 
   const buffer = await wb.xlsx.writeBuffer()
   const date = new Date().toISOString().slice(0, 10)
+  const asciiName = `HQA_DTC_export_${date}.xlsx`
+  const displayName = `HQA_DTC振り分け根拠_${date}.xlsx`
+  const disposition = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(displayName)}`
 
   return new Response(buffer, {
     headers: {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="HQA_DTC振り分け根拠_${date}.xlsx"`,
+      "Content-Disposition": disposition,
     },
   })
 }
