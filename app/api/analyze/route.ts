@@ -1,6 +1,8 @@
 import { buildSystemPrompt } from "@/lib/prompt"
 import { NextResponse } from "next/server"
 
+export const runtime = "nodejs"
+
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
 
 export async function POST(req: Request) {
@@ -20,7 +22,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
 
-  if (!defect_report.trim()) {
+  if (!defect_report?.trim()) {
     return NextResponse.json({ error: "defect_report is required" }, { status: 400 })
   }
 
@@ -44,12 +46,13 @@ export async function POST(req: Request) {
       ],
       generationConfig: {
         temperature: 0.2,
+        maxOutputTokens: 2000,
       },
     }),
   })
 
   const data = (await response.json()) as {
-    error?: { message?: string; status?: string }
+    error?: { message?: string }
     candidates?: Array<{
       content?: { parts?: Array<{ text?: string }> }
     }>
@@ -65,10 +68,23 @@ export async function POST(req: Request) {
   }
 
   const parts = data.candidates?.[0]?.content?.parts
-  const content = parts?.map((p) => p.text ?? "").join("") ?? ""
-  if (!content) {
+  const resultText = parts?.map((p) => p.text ?? "").join("") ?? ""
+  if (!resultText) {
     return NextResponse.json({ error: "Empty response from Gemini" }, { status: 502 })
   }
 
-  return NextResponse.json({ result: content })
+  let parsed: unknown = null
+  const jsonMatch = resultText.match(/```json\s*([\s\S]*?)\s*```/)
+  if (jsonMatch?.[1]) {
+    try {
+      parsed = JSON.parse(jsonMatch[1].trim())
+    } catch {
+      parsed = null
+    }
+  }
+
+  return NextResponse.json({
+    result: resultText,
+    parsed,
+  })
 }

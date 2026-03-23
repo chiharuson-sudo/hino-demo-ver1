@@ -1,9 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { BarChart3, TrendingUp } from "lucide-react"
+import { useState, useCallback } from "react"
+import { Download, ExternalLink, Loader2, TrendingUp } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -20,426 +21,482 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  DEFECT_MATRIX,
-  DTC_VEHICLE_COUNTS,
-  EVENT_CATEGORIES,
-  MONTHLY_COUNTS,
-  SUMMARY_STATS,
+  COMPONENT_COLS,
+  EVENT_ROWS,
+  TRENDING_COMPONENT,
+  type ComponentCategory,
   type EventCategory,
-  type VehicleType,
-  getDTCCountByVehicle,
-  getMatrixCount,
-  getTotalCount,
-} from "@/lib/matrix-ui-stats"
+  type MatrixVehicleFilter,
+  getCellCount,
+  getMatrixTotal,
+  getSoftwareControlTotal,
+} from "@/lib/stats-data"
 
-const VEHICLE_FILTERS: VehicleType[] = ["全て", "大型", "中型", "小型"]
-const VEHICLE_COLS = ["大型", "中型", "小型"] as const
+const VEHICLE_FILTERS: MatrixVehicleFilter[] = ["全て", "大型", "中型", "小型"]
 
-function heatClass(value: number, maxVal: number): string {
-  if (value === 0) return "text-muted-foreground"
-  const r = maxVal > 0 ? value / maxVal : 0
-  if (r < 0.15) return "bg-amber-50 text-amber-900 font-medium"
-  if (r < 0.4) return "bg-orange-100 text-orange-900 font-semibold"
-  return "bg-red-100 text-red-900 font-bold"
+interface InquiryRecord {
+  id: string
+  chassisNumber: string
+  dtcCode: string
+  status: "調査中" | "対策済" | "保留" | "新規"
+  vehicleCategory: "大型" | "中型" | "小型"
+  date: string
+}
+
+function heatClass(value: number, isSoftwareCol: boolean): string {
+  if (value === 0) return "bg-white text-muted-foreground"
+  if (isSoftwareCol) {
+    if (value <= 2) return "bg-[#F3E5F5] text-violet-950 font-medium"
+    if (value <= 4) return "bg-[#E1BEE7] text-violet-950 font-semibold"
+    return "bg-[#CE93D8] text-violet-950 font-bold"
+  }
+  if (value <= 2) return "bg-[#FFF3E0] text-amber-950 font-medium"
+  if (value <= 4) return "bg-[#FFE0B2] text-orange-950 font-semibold"
+  return "bg-[#FFCC80] text-orange-950 font-bold"
 }
 
 function mapHighlightEvent(raw?: string): EventCategory | undefined {
   if (!raw) return undefined
   const t = raw.trim()
-  if (EVENT_CATEGORIES.includes(t as EventCategory)) return t as EventCategory
-  if (t.includes("異音") || t.includes("振動")) return "異音・振動"
+  if (EVENT_ROWS.includes(t as EventCategory)) return t as EventCategory
+  if (t.includes("プログラム")) return "プログラム不具合"
   if (t.includes("通信")) return "通信異常"
-  if (t.includes("走行不能") || t.includes("不能")) return "走行不能"
-  if (t.includes("性能") || t.includes("低下")) return "性能低下"
+  if (t.includes("油脂") || t.includes("漏れ")) return "油脂漏れ"
+  if (t.includes("破損")) return "破損"
+  if (t.includes("異音") || t.includes("振動")) return "異音"
+  if (t.includes("作動")) return "作動不良"
   if (t.includes("警告灯") || t.includes("点灯")) return "警告灯点灯"
+  if (t.includes("走行不能")) return "作動不良"
+  if (t.includes("性能")) return "油脂漏れ"
   return undefined
 }
 
-function mapVehicle(raw?: string): "大型" | "中型" | "小型" | undefined {
+function mapHighlightComponent(raw?: string): ComponentCategory | undefined {
   if (!raw) return undefined
-  if (raw.includes("大型")) return "大型"
-  if (raw.includes("中型")) return "中型"
-  if (raw.includes("小型")) return "小型"
+  const t = raw.toLowerCase()
+  if (t.includes("ソフト") || t.includes("制御ソフト") || t.includes("プログラム"))
+    return "ソフトウェア/制御"
+  if (t.includes("bsd") || t.includes("bst") || t.includes("ブレーキシグナル"))
+    return "BSD"
+  if (t.includes("ドライブ") || t.includes("トレイン") || t.includes("変速"))
+    return "ドライブトレイン"
+  if (t.includes("制動") || t.includes("ブレーキ") || t.includes("ebs") || t.includes("abs"))
+    return "制動装置"
+  if (t.includes("電子") || t.includes("ecu") || t.includes("電装"))
+    return "電子制御"
+  if (t.includes("エンジン")) return "エンジン"
   return undefined
+}
+
+function makeDrillRecords(
+  event: EventCategory,
+  component: ComponentCategory,
+  count: number,
+  filter: MatrixVehicleFilter
+): InquiryRecord[] {
+  const n = Math.min(count, 40)
+  const mix = (["大型", "大型", "中型", "小型"] as const)
+  const cat: "大型" | "中型" | "小型" =
+    filter === "全て"
+      ? mix[0]!
+      : filter === "中型"
+        ? "中型"
+        : filter === "小型"
+          ? "小型"
+          : "大型"
+  const dtcPool = ["2B0402", "2C0402", "2A0408", "160405", "7F0530"]
+  return Array.from({ length: n }, (_, i) => {
+    const vcat = filter === "全て" ? mix[i % mix.length]! : cat
+    return {
+      id: `INQ-${event.slice(0, 1)}${component.slice(0, 1)}-${String(i + 1).padStart(3, "0")}`,
+      chassisNumber: `${vcat === "中型" ? "HNMD" : vcat === "小型" ? "HNSM" : "HNTF"}-${Math.floor(10000 + Math.random() * 90000)}`,
+      dtcCode: dtcPool[i % dtcPool.length],
+      status: (["新規", "調査中", "対策済", "保留"] as const)[i % 4],
+      vehicleCategory: vcat,
+      date: "2026-02-15",
+    }
+  })
 }
 
 export interface DefectMatrixProps {
   highlightEvent?: string
-  /** 解析結果の車両型（大型・中型・小型）— マトリクス列の強調に使用 */
-  highlightVehicleCategory?: string
+  highlightComponent?: string
 }
 
-export function DefectMatrix({
-  highlightEvent,
-  highlightVehicleCategory,
-}: DefectMatrixProps) {
-  const [filter, setFilter] = useState<VehicleType>("全て")
+export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatrixProps) {
+  const [filter, setFilter] = useState<MatrixVehicleFilter>("全て")
+  const [exporting, setExporting] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selected, setSelected] = useState<{
+  const [selectedCell, setSelectedCell] = useState<{
     event: EventCategory
-    vehicle: (typeof VEHICLE_COLS)[number]
-    count: number
+    component: ComponentCategory
+    records: InquiryRecord[]
   } | null>(null)
 
-  const rowCategory = mapHighlightEvent(highlightEvent)
-  const colVehicle = mapVehicle(highlightVehicleCategory)
+  const rowHi = mapHighlightEvent(highlightEvent)
+  const colHi = mapHighlightComponent(highlightComponent)
 
-  const maxCell = useMemo(() => {
-    let m = 0
-    for (const ev of EVENT_CATEGORIES) {
-      for (const vt of VEHICLE_COLS) {
-        m = Math.max(m, DEFECT_MATRIX[vt][ev] ?? 0)
-      }
+  const total = getMatrixTotal(filter)
+  const swTotal = getSoftwareControlTotal(filter)
+
+  const handleCellClick = (event: EventCategory, component: ComponentCategory) => {
+    const count = getCellCount(filter, event, component)
+    if (count === 0) return
+    setSelectedCell({
+      event,
+      component,
+      records: makeDrillRecords(event, component, count, filter),
+    })
+    setDialogOpen(true)
+  }
+
+  const handleExport = useCallback(async () => {
+    setExporting(true)
+    try {
+      const res = await fetch("/api/export")
+      if (!res.ok) throw new Error("export failed")
+      const blob = await res.blob()
+      const cd = res.headers.get("Content-Disposition")
+      const m = cd?.match(/filename="([^"]+)"/)
+      const name = m?.[1] ?? "export.xlsx"
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = name
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // ignore
+    } finally {
+      setExporting(false)
     }
-    return m
   }, [])
 
-  const totalFiltered = getTotalCount(filter)
-
-  const monthlyMax = useMemo(
-    () => Math.max(...MONTHLY_COUNTS.map((x) => x.count), 1),
-    []
-  )
-
-  const openCell = (event: EventCategory, vehicle: (typeof VEHICLE_COLS)[number]) => {
-    const count = DEFECT_MATRIX[vehicle][event] ?? 0
-    if (count === 0) return
-    setSelected({ event, vehicle, count })
-    setDialogOpen(true)
+  const getStatusBadge = (status: InquiryRecord["status"]) => {
+    switch (status) {
+      case "新規":
+        return "border-red-200 bg-red-50 text-red-700"
+      case "調査中":
+        return "border-amber-200 bg-amber-50 text-amber-700"
+      case "保留":
+        return "border-slate-200 bg-slate-50 text-slate-600"
+      case "対策済":
+        return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    }
   }
 
   return (
     <>
-      <div className="flex flex-col gap-4">
-        {/* サマリーカード */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="border-border">
-            <CardContent className="p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {"総事例数"}
-              </p>
-              <p className="text-2xl font-bold text-[#D30515]">
-                {SUMMARY_STATS.total_cases.toLocaleString()}
-                <span className="text-sm font-normal text-muted-foreground">{" 件"}</span>
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-border">
-            <CardContent className="p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {"完治率 / 最多DTC"}
-              </p>
-              <p className="text-lg font-bold text-card-foreground">
-                {SUMMARY_STATS.cure_rate}
-                {"% / "}
-                <span className="font-mono text-[#D30515]">{SUMMARY_STATS.top_dtc}</span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {SUMMARY_STATS.top_dtc_count.toLocaleString()}
-                {" 件"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-border">
-            <CardContent className="p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {"大型車比率"}
-              </p>
-              <p className="text-2xl font-bold text-card-foreground">
-                {SUMMARY_STATS.large_truck_ratio}
-                <span className="text-sm">{" %"}</span>
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-border">
-            <CardContent className="p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {"最多修理内容"}
-              </p>
-              <p className="text-xs font-medium leading-snug text-card-foreground">
-                {SUMMARY_STATS.most_common_repair}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* メイン：事象 × 車両型マトリクス */}
-        <Card className="border-border">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <CardTitle className="text-sm font-semibold text-card-foreground">
-                    {"不具合マトリクス（車両型 × 事象カテゴリ）"}
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    {
-                      "H28規制大トラ BST/EBS/ABS ランプ点灯・機能不良（6,249件）に基づく集計"
-                    }
-                  </p>
+      <Card className="border-border">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <CardTitle className="text-base font-bold text-card-foreground">
+                  {"本日の不具合マトリクス"}
+                </CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {"事象（行）× 部品（列）— セルをクリックして詳細を表示"}
+                </p>
+              </div>
+              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="bg-muted/80 text-[10px] text-muted-foreground">
+                    {"合計：" + total.toLocaleString() + " 件"}
+                  </Badge>
+                  <Badge className="gap-1 border-violet-200 bg-violet-100 text-[10px] font-semibold text-violet-900 hover:bg-violet-100">
+                    <TrendingUp className="h-3 w-3" />
+                    {"SW/制御：" + swTotal.toLocaleString() + " 件"}
+                  </Badge>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm border border-border bg-white" />
+                    {"0"}
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#FFF3E0] ring-1 ring-orange-200" />
+                    {"1-2"}
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#FFE0B2] ring-1 ring-orange-300" />
+                    {"3-4"}
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#FFCC80] ring-1 ring-orange-400" />
+                    {"5+"}
+                  </div>
                 </div>
+                <Button
+                  type="button"
+                  onClick={handleExport}
+                  disabled={exporting}
+                  variant="outline"
+                  size="sm"
+                  className="border-[#D30515] text-[#D30515] hover:bg-[#D30515] hover:text-white"
+                >
+                  {exporting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {"生成中..."}
+                    </>
+                  ) : (
+                    <>
+                      <Download className="mr-2 h-4 w-4" />
+                      {"DTC振り分け根拠をエクスポート"}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {"車両型フィルタ:"}
+              </span>
+              <div className="inline-flex h-8 flex-wrap items-center rounded-md border border-border bg-muted p-0.5">
+                {VEHICLE_FILTERS.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setFilter(cat)}
+                    className={`relative inline-flex h-7 items-center justify-center rounded-sm px-3 text-xs font-medium transition-all ${
+                      filter === cat
+                        ? "bg-[#D30515] text-white shadow-sm"
+                        : "text-muted-foreground hover:text-card-foreground"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              {filter !== "全て" && (
                 <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                  {"表示合計: " + getTotalCount(filter).toLocaleString() + " 件"}
+                  {"フィルタ: " + filter}
                 </Badge>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {"車両型フィルタ:"}
-                </span>
-                <div className="inline-flex h-8 flex-wrap items-center rounded-md border border-border bg-muted p-0.5">
-                  {VEHICLE_FILTERS.map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setFilter(cat)}
-                      className={`relative inline-flex h-7 items-center justify-center rounded-sm px-3 text-xs font-medium transition-all ${
-                        filter === cat
-                          ? "bg-[#D30515] text-white shadow-sm"
-                          : "text-muted-foreground hover:text-card-foreground"
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border">
-                    <TableHead className="min-w-[120px] text-xs font-semibold text-muted-foreground">
-                      {"事象 \\ 車両型"}
-                    </TableHead>
-                    {(filter === "全て" ? VEHICLE_COLS : [filter]).map((vt) => (
-                      <TableHead
-                        key={vt}
-                        className={`text-center text-xs font-semibold ${
-                          colVehicle === vt ? "text-[#D30515]" : "text-muted-foreground"
-                        }`}
-                      >
-                        {vt}
-                      </TableHead>
-                    ))}
-                    <TableHead className="text-center text-xs font-semibold text-muted-foreground">
-                      {"行計"}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {EVENT_CATEGORIES.map((event) => {
-                    const rowSum = getMatrixCount(filter, event)
-                    const isRowHi = rowCategory === event
-                    return (
-                      <TableRow
-                        key={event}
-                        className={`border-border ${isRowHi ? "bg-red-50/50" : ""}`}
-                      >
-                        <TableCell
-                          className={`text-xs font-medium ${
-                            isRowHi ? "text-[#D30515] font-semibold" : "text-card-foreground"
-                          }`}
-                        >
-                          {event}
-                        </TableCell>
-                        {(filter === "全て" ? VEHICLE_COLS : [filter]).map((vt) => {
-                          const value =
-                            vt === "大型" || vt === "中型" || vt === "小型"
-                              ? DEFECT_MATRIX[vt][event] ?? 0
-                              : 0
-                          const isCellHi =
-                            rowCategory === event &&
-                            colVehicle === vt &&
-                            filter === "全て"
-                          return (
-                            <TableCell key={vt} className="p-0 text-center text-xs">
-                              <button
-                                type="button"
-                                disabled={value === 0}
-                                onClick={() =>
-                                  openCell(event, vt as (typeof VEHICLE_COLS)[number])
-                                }
-                                className={`flex h-full w-full items-center justify-center px-3 py-2 transition-all ${heatClass(value, maxCell)} ${
-                                  value > 0
-                                    ? "cursor-pointer hover:ring-2 hover:ring-[#D30515]/40 hover:ring-offset-1"
-                                    : "cursor-default"
-                                } ${
-                                  isCellHi ? "ring-2 ring-[#D30515] ring-offset-1" : ""
-                                }`}
-                              >
-                                {value.toLocaleString()}
-                              </button>
-                            </TableCell>
-                          )
-                        })}
-                        <TableCell className="text-center text-xs font-semibold text-card-foreground">
-                          {rowSum.toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                  <TableRow className="border-border bg-muted/50">
-                    <TableCell className="text-xs font-bold text-card-foreground">
-                      {"列計"}
-                    </TableCell>
-                    {(filter === "全て" ? VEHICLE_COLS : [filter]).map((vt) => {
-                      const colSum =
-                        vt === "大型" || vt === "中型" || vt === "小型"
-                          ? EVENT_CATEGORIES.reduce(
-                              (s, ev) => s + (DEFECT_MATRIX[vt][ev] ?? 0),
-                              0
-                            )
-                          : 0
-                      return (
-                        <TableCell
-                          key={vt}
-                          className="text-center text-xs font-bold text-card-foreground"
-                        >
-                          {colSum.toLocaleString()}
-                        </TableCell>
-                      )
-                    })}
-                    <TableCell className="text-center text-xs font-bold text-[#D30515]">
-                      {totalFiltered.toLocaleString()}
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* DTC × 車両型 */}
-        <Card className="border-border">
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-[#D30515]" />
-              <CardTitle className="text-sm font-semibold text-card-foreground">
-                {"DTC別 × 車両型 件数（上位）"}
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">{"DTC"}</TableHead>
-                  <TableHead className="text-center text-xs">{"大型"}</TableHead>
-                  <TableHead className="text-center text-xs">{"中型"}</TableHead>
-                  <TableHead className="text-center text-xs">{"小型"}</TableHead>
-                  <TableHead className="text-center text-xs">{"計"}</TableHead>
+                <TableRow className="border-border">
+                  <TableHead className="min-w-[130px] text-xs font-semibold text-muted-foreground">
+                    {"事象 \\ 部品"}
+                  </TableHead>
+                  {COMPONENT_COLS.map((comp) => {
+                    const isSw = comp === TRENDING_COMPONENT
+                    const isHi = colHi === comp
+                    return (
+                      <TableHead
+                        key={comp}
+                        className={`text-center text-xs font-semibold ${
+                          isHi ? "text-[#D30515]" : isSw ? "text-violet-800" : "text-muted-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          {comp}
+                          {isSw && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-800">
+                              <TrendingUp className="h-3 w-3 shrink-0" />
+                              <span className="tabular-nums">{swTotal}</span>
+                            </span>
+                          )}
+                        </div>
+                      </TableHead>
+                    )
+                  })}
+                  <TableHead className="text-center text-xs font-semibold text-muted-foreground">
+                    {"計"}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {DTC_VEHICLE_COUNTS.map((row) => (
-                  <TableRow key={row.dtc_code}>
-                    <TableCell className="font-mono text-xs font-semibold text-[#D30515]">
-                      {row.dtc_code}
-                    </TableCell>
-                    <TableCell className="text-center text-xs">
-                      {row.大型.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-center text-xs">
-                      {row.中型.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-center text-xs">
-                      {row.小型.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-center text-xs font-semibold">
-                      {row.total.toLocaleString()}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {EVENT_ROWS.map((event) => {
+                  const rowTotal = COMPONENT_COLS.reduce(
+                    (s, c) => s + getCellCount(filter, event, c),
+                    0
+                  )
+                  const isNewRow = event === "通信異常" || event === "プログラム不具合"
+                  const isRowHi = rowHi === event
+                  return (
+                    <TableRow
+                      key={event}
+                      className={`border-border ${isRowHi ? "bg-red-50/50" : ""}`}
+                    >
+                      <TableCell
+                        className={`text-xs font-medium ${
+                          isRowHi ? "font-semibold text-[#D30515]" : "text-card-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          {event}
+                          {isNewRow && (
+                            <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold leading-none text-violet-700">
+                              {"NEW"}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      {COMPONENT_COLS.map((comp) => {
+                        const value = getCellCount(filter, event, comp)
+                        const isSw = comp === TRENDING_COMPONENT
+                        const isCellHi = rowHi === event && colHi === comp
+                        return (
+                          <TableCell key={comp} className="p-0 text-center text-xs">
+                            <button
+                              type="button"
+                              disabled={value === 0}
+                              onClick={() => handleCellClick(event, comp)}
+                              className={`flex h-full min-h-[40px] w-full items-center justify-center px-2 py-2 transition-all ${heatClass(
+                                value,
+                                isSw
+                              )} ${
+                                value > 0
+                                  ? "cursor-pointer hover:ring-2 hover:ring-[#D30515]/40 hover:ring-offset-1"
+                                  : "cursor-default"
+                              } ${isCellHi ? "ring-2 ring-[#D30515] ring-offset-1" : ""}`}
+                              title={
+                                value > 0
+                                  ? `${event} × ${comp}: ${value}件`
+                                  : undefined
+                              }
+                            >
+                              {value === 0 ? "0" : value.toLocaleString()}
+                            </button>
+                          </TableCell>
+                        )
+                      })}
+                      <TableCell className="text-center text-xs font-semibold text-card-foreground">
+                        {rowTotal.toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                <TableRow className="border-border bg-muted/50">
+                  <TableCell className="text-xs font-bold text-card-foreground">
+                    {"計"}
+                  </TableCell>
+                  {COMPONENT_COLS.map((comp) => {
+                    const colTotal = EVENT_ROWS.reduce(
+                      (s, ev) => s + getCellCount(filter, ev, comp),
+                      0
+                    )
+                    const isSw = comp === TRENDING_COMPONENT
+                    return (
+                      <TableCell
+                        key={comp}
+                        className={`text-center text-xs font-bold ${
+                          isSw ? "text-violet-900" : "text-card-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          {colTotal.toLocaleString()}
+                          {isSw && <TrendingUp className="h-3 w-3 text-violet-600" />}
+                        </div>
+                      </TableCell>
+                    )
+                  })}
+                  <TableCell className="text-center text-xs font-bold text-[#D30515]">
+                    {total.toLocaleString()}
+                  </TableCell>
+                </TableRow>
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-
-        {/* 月別推移 */}
-        <Card className="border-border">
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-violet-600" />
-              <CardTitle className="text-sm font-semibold text-card-foreground">
-                {"月別発生件数（直近24ヶ月）"}
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex min-h-[96px] items-end gap-0.5 overflow-x-auto pb-1">
-              {MONTHLY_COUNTS.map((m) => (
-                <div
-                  key={m.year_month}
-                  className="flex min-w-[18px] flex-1 flex-col items-center gap-1"
-                  title={`${m.year_month}: ${m.count}件`}
-                >
-                  <div
-                    className="w-full max-w-[24px] rounded-t bg-primary/80"
-                    style={{
-                      height: `${Math.max(6, (m.count / monthlyMax) * 100)}%`,
-                      minHeight: 4,
-                    }}
-                  />
-                  <span className="rotate-45 text-[8px] text-muted-foreground">
-                    {m.year_month.slice(2)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="text-sm">
-              {"セル詳細"}
-              {selected && (
+            <DialogTitle className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-[#D30515]">{"問い合わせ一覧"}</span>
+              {selectedCell && (
                 <>
-                  <span className="text-muted-foreground">{" — "}</span>
+                  <span className="text-muted-foreground">{"—"}</span>
                   <Badge variant="outline" className="text-[10px]">
-                    {selected.event}
+                    {selectedCell.event}
                   </Badge>
-                  <span className="text-muted-foreground">{" × "}</span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {selected.vehicle}
+                  <span className="text-muted-foreground">{"×"}</span>
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${
+                      selectedCell.component === TRENDING_COMPONENT
+                        ? "border-violet-200 text-violet-800"
+                        : ""
+                    }`}
+                  >
+                    {selectedCell.component}
                   </Badge>
                 </>
               )}
             </DialogTitle>
-            <DialogDescription className="text-left text-xs">
-              {selected && (
-                <>
-                  <p className="mb-2">
-                    {"該当セルの件数: "}
-                    <strong>{selected.count.toLocaleString()}</strong>
-                    {" 件"}
-                  </p>
-                  <p className="text-muted-foreground">
-                    {
-                      "集計は市技報データベース（6,249件）に基づく推計です。DTC別内訳の参考として上位コードの件数を示します。"
-                    }
-                  </p>
-                  <ul className="mt-2 list-inside list-disc space-y-1">
-                    {DTC_VEHICLE_COUNTS.slice(0, 3).map((d) => (
-                      <li key={d.dtc_code} className="font-mono text-[11px]">
-                        {d.dtc_code}
-                        {"（"}
-                        {getDTCCountByVehicle(d.dtc_code, selected.vehicle as VehicleType)}
-                        {" / "}
-                        {selected.vehicle}
-                        {"）"}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+            <DialogDescription className="text-xs">
+              {filter !== "全て"
+                ? `${filter}向け表示 — ${selectedCell?.records.length ?? 0}件（サンプル）`
+                : `全車両 — ${selectedCell?.records.length ?? 0}件（サンプル）`}
             </DialogDescription>
           </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto">
+            {selectedCell && selectedCell.records.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border">
+                    <TableHead className="text-xs font-semibold text-muted-foreground">
+                      {"問い合わせID"}
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground">
+                      {"車台番号"}
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground">
+                      {"DTCコード"}
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground">
+                      {"日付"}
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground">
+                      {"ステータス"}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedCell.records.map((record) => (
+                    <TableRow key={record.id} className="border-border">
+                      <TableCell className="text-xs font-medium text-card-foreground">
+                        <div className="flex items-center gap-1.5">
+                          {record.id}
+                          <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-card-foreground">
+                        {record.chassisNumber}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className="font-mono text-[10px] font-semibold text-[#D30515]"
+                        >
+                          {record.dtcCode}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {record.date}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${getStatusBadge(record.status)}`}
+                        >
+                          {record.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <p className="text-sm text-muted-foreground">
+                  {"該当する問い合わせはありません"}
+                </p>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>

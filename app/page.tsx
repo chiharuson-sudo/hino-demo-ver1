@@ -39,12 +39,9 @@ function parseRoutingGroup(routing: string): string {
   return m ? m[1] : routing.replace(/への転送.*$/u, "").trim() || "（要確認）"
 }
 
-/** Gemini（/api/analyze）のマークダウン＋JSON出力を TriageResult に変換 */
-function parseGeminiAnalyzeResponse(outputText: string): TriageResult | null {
-  const jsonStr = extractJsonBlock(outputText)
-  if (!jsonStr) return null
+function mapParsedJsonToTriage(j: Record<string, unknown>): TriageResult | null {
   try {
-    const j = JSON.parse(jsonStr) as Record<string, unknown>
+    const ds = j.dtc_selection as Record<string, unknown> | undefined
     const vehicleRaw = String(j.vehicle_type ?? "大型")
     const vehicleCategory = normalizeVehicleType(vehicleRaw)
     const eventType = String(j.event_category ?? "警告灯点灯")
@@ -55,8 +52,11 @@ function parseGeminiAnalyzeResponse(outputText: string): TriageResult | null {
       : []
     const priority = String(j.priority ?? "中")
     const routing_target = String(j.routing_target ?? "")
-    const reasoning = String(j.reasoning ?? outputText)
+    const reasoning = String(j.reasoning ?? "")
     const recommended_action = String(j.recommended_action ?? "")
+    const selectedDtc = String(
+      j.selected_dtc ?? ds?.selected_dtc ?? ""
+    )
 
     return {
       vehicleCategory,
@@ -68,7 +68,20 @@ function parseGeminiAnalyzeResponse(outputText: string): TriageResult | null {
       engineeringGroup: parseRoutingGroup(routing_target),
       confidence: priorityToConfidence(priority),
       dtcCodes,
+      selectedDtc: selectedDtc || undefined,
     }
+  } catch {
+    return null
+  }
+}
+
+/** Gemini（/api/analyze）のマークダウン＋JSON出力を TriageResult に変換 */
+function parseGeminiAnalyzeResponse(outputText: string): TriageResult | null {
+  const jsonStr = extractJsonBlock(outputText)
+  if (!jsonStr) return null
+  try {
+    const j = JSON.parse(jsonStr) as Record<string, unknown>
+    return mapParsedJsonToTriage(j)
   } catch {
     return null
   }
@@ -93,19 +106,19 @@ function simulateTriageAnalysis(text: string): TriageResult {
     lowerText.includes("プログラム") &&
     (lowerText.includes("不具合") || lowerText.includes("異常") || lowerText.includes("エラー"))
   ) {
-    eventType = "通信異常"
+    eventType = "プログラム不具合"
   } else if (lowerText.includes("異音") || lowerText.includes("振動")) {
-    eventType = "異音・振動"
+    eventType = "異音"
   } else if (lowerText.includes("走行不能") || lowerText.includes("走れない")) {
-    eventType = "走行不能"
+    eventType = "作動不良"
   } else if (lowerText.includes("性能") || lowerText.includes("出力低下")) {
-    eventType = "性能低下"
+    eventType = "油脂漏れ"
   } else if (lowerText.includes("作動不良") || lowerText.includes("作動")) {
-    eventType = "警告灯点灯"
+    eventType = "作動不良"
   } else if (lowerText.includes("破損") || lowerText.includes("割れ") || lowerText.includes("壊")) {
-    eventType = "異音・振動"
+    eventType = "破損"
   } else if (lowerText.includes("漏れ") || lowerText.includes("油脂") || lowerText.includes("オイル")) {
-    eventType = "性能低下"
+    eventType = "油脂漏れ"
   }
 
   let component = "エンジン"
@@ -161,6 +174,7 @@ function simulateTriageAnalysis(text: string): TriageResult {
     engineeringGroup,
     confidence,
     dtcCodes,
+    selectedDtc: dtcCodes[0],
   }
 }
 
@@ -187,9 +201,17 @@ export default function Page() {
           body: JSON.stringify({ defect_report: inputText }),
         })
 
-        const json = (await response.json()) as { result?: string; error?: string }
+        const json = (await response.json()) as {
+          result?: string
+          parsed?: Record<string, unknown> | null
+          error?: string
+        }
 
-        if (response.ok && json.result) {
+        if (response.ok && json.parsed && typeof json.parsed === "object") {
+          setAnalysisStatus("解析結果を整形中...")
+          analysisResult = mapParsedJsonToTriage(json.parsed)
+        }
+        if (!analysisResult && response.ok && json.result) {
           setAnalysisStatus("解析結果を整形中...")
           analysisResult = parseGeminiAnalyzeResponse(json.result)
         }
@@ -237,7 +259,7 @@ export default function Page() {
         <div className="mx-auto mt-4 max-w-7xl lg:mt-6">
           <DefectMatrix
             highlightEvent={result?.eventType}
-            highlightVehicleCategory={result?.vehicleCategory}
+            highlightComponent={result?.component}
           />
         </div>
 

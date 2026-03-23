@@ -16,6 +16,8 @@ export interface TriageResult {
   engineeringGroup: string
   confidence: number
   dtcCodes?: string[]
+  /** Gemini JSON の一次選択DTC */
+  selectedDtc?: string
 }
 
 interface ResultPanelProps {
@@ -86,6 +88,11 @@ export function ResultPanel({ result, isAnalyzing }: ResultPanelProps) {
       <CardContent className="flex flex-1 flex-col gap-4">
         {/* Triage Badges */}
         <div className="flex flex-wrap items-center gap-2">
+          {result.selectedDtc ? (
+            <Badge variant="outline" className="font-mono text-[10px] text-[#D30515]">
+              {"選択DTC: " + result.selectedDtc}
+            </Badge>
+          ) : null}
           <Badge className="gap-1.5 bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground">
             <Truck className="h-3.5 w-3.5" />
             {"#車両型: " + result.vehicleCategory}
