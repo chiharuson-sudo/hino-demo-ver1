@@ -5,8 +5,9 @@ import {
   buildExportMatrixSections,
   buildRationaleRowCells,
   DTC_RATIONALE_HEADERS,
-  DTC_SELECTED_COLUMN_INDEX,
   EXPORT_MATRIX_COMPONENTS,
+  getRationaleTone,
+  type RationaleTone,
 } from "@/lib/dtc-export-rationale"
 
 /** 全件HTMLが約32MBとなり、静的プリレンダーは Vercel の ISR 上限（約19MB）を超えるため */
@@ -17,11 +18,44 @@ export const metadata = {
   description: "Excelエクスポートと同内容のDTC振り分け根拠・マトリクス",
 }
 
-function heatClass(cnt: number): string {
-  if (cnt >= 5) return "bg-[#FFCC80]"
-  if (cnt >= 3) return "bg-[#FFE0B2]"
-  if (cnt >= 1) return "bg-[#FFF3E0]"
-  return "bg-white"
+function matrixCellToneClass(tone: RationaleTone, cnt: number): string {
+  if (cnt === 0) return "bg-zinc-50 text-zinc-400"
+  switch (tone) {
+    case "new":
+      return "bg-red-100 font-medium text-red-950"
+    case "narrowed":
+      return "bg-orange-100 font-medium text-orange-950"
+    case "low":
+      return "bg-yellow-100 font-medium text-yellow-950"
+    default:
+      return "bg-white text-zinc-900"
+  }
+}
+
+function rowToneClass(tone: RationaleTone): string {
+  switch (tone) {
+    case "new":
+      return "bg-red-50/95"
+    case "narrowed":
+      return "bg-orange-50/95"
+    case "low":
+      return "bg-yellow-50/95"
+    default:
+      return "bg-white"
+  }
+}
+
+function stickyToneBg(tone: RationaleTone): string {
+  switch (tone) {
+    case "new":
+      return "bg-red-50"
+    case "narrowed":
+      return "bg-orange-50"
+    case "low":
+      return "bg-yellow-50"
+    default:
+      return "bg-white"
+  }
 }
 
 export default function DtcExportRationalePage() {
@@ -58,6 +92,25 @@ export default function DtcExportRationalePage() {
           <h2 className="mb-3 text-sm font-bold text-zinc-800">
             {"1. マトリクス（Excelの「マトリクス_*」シート相当）"}
           </h2>
+          <p className="mb-2 flex flex-wrap items-center gap-3 text-xs text-zinc-600">
+            <span className="font-semibold text-zinc-700">{"色の意味（セル内に該当する事例の最優先トーン）:"}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded-sm bg-red-100 ring-1 ring-red-200" />
+              {"DTCなし・テキストから判断（赤）"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded-sm bg-orange-100 ring-1 ring-orange-200" />
+              {"複数DTCから1件に絞り込み（橙）"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded-sm bg-yellow-100 ring-1 ring-yellow-200" />
+              {"確信度「低」（黄）"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded-sm border border-zinc-200 bg-white" />
+              {"上記以外 / 0件"}
+            </span>
+          </p>
           <div className="space-y-8">
             {matrixSections.map((sec) => (
               <div key={sec.vtype}>
@@ -93,7 +146,10 @@ export default function DtcExportRationalePage() {
                           {r.counts.map((cnt, i) => (
                             <td
                               key={i}
-                              className={`border border-zinc-200 px-2 py-1.5 text-center tabular-nums ${heatClass(cnt)}`}
+                              className={`border border-zinc-200 px-2 py-1.5 text-center tabular-nums ${matrixCellToneClass(
+                                r.cellTones[i]!,
+                                cnt
+                              )}`}
                             >
                               {cnt}
                             </td>
@@ -131,7 +187,7 @@ export default function DtcExportRationalePage() {
           </h2>
           <p className="mb-2 text-xs text-zinc-500">
             {
-              "信頼度「低」は行背景を薄い黄色、選択DTCが2A0408は赤系、それ以外の選択ありはオレンジ系で強調しています。"
+              "行の背景色はマトリクスと同じ基準です（赤: DTCなし、橙: 複数DTCから選択、黄: 確信度低）。"
             }
           </p>
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -150,10 +206,10 @@ export default function DtcExportRationalePage() {
               </thead>
               <tbody>
                 {cases.map((c) => {
-                  const { cells, sel } = buildRationaleRowCells(c)
-                  const low = sel.confidence === "低"
-                  const rowBg = low ? "bg-amber-50/90" : "bg-white"
-                  const stickyNoBg = low ? "bg-amber-50" : "bg-white"
+                  const { cells } = buildRationaleRowCells(c)
+                  const tone = getRationaleTone(c)
+                  const rowBg = rowToneClass(tone)
+                  const stickyNoBg = stickyToneBg(tone)
                   return (
                     <tr key={c.no} className={"border-b border-zinc-100 " + rowBg}>
                       {cells.map((cell, i) => {
@@ -163,12 +219,6 @@ export default function DtcExportRationalePage() {
                           cellClass +=
                             " sticky left-0 z-[1] border-r border-zinc-200 font-mono tabular-nums shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] " +
                             stickyNoBg
-                        }
-                        if (i === DTC_SELECTED_COLUMN_INDEX) {
-                          if (sel.selected === "2A0408")
-                            cellClass += " bg-red-100 font-semibold text-red-900"
-                          else if (sel.selected)
-                            cellClass += " bg-orange-50 font-medium text-orange-950"
                         }
                         return (
                           <td key={i} className={cellClass}>

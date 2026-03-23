@@ -94,6 +94,47 @@ export function getPriority(dtc: string): string {
   return dtc === "2A0408" ? "高" : dtc ? "中" : "低"
 }
 
+/** 根拠マトリクス・行の背景色（優先度: 新規判断 > 複数絞り込み > 確信度低） */
+export type RationaleTone = "new" | "narrowed" | "low" | "neutral"
+
+export function getRationaleTone(c: HQACase): RationaleTone {
+  const sel = selectPrimaryDTC(c)
+  if (c.dtc_codes.length === 0) return "new"
+  if (c.dtc_codes.length > 1) return "narrowed"
+  if (sel.confidence === "低") return "low"
+  return "neutral"
+}
+
+const TONE_RANK: Record<RationaleTone, number> = {
+  neutral: 0,
+  low: 1,
+  narrowed: 2,
+  new: 3,
+}
+
+/** セル内の複数件から、最も強いトーンを採用（混在時は赤 > 橙 > 黄） */
+export function aggregateCellTone(casesInCell: HQACase[]): RationaleTone {
+  if (casesInCell.length === 0) return "neutral"
+  let best: RationaleTone = "neutral"
+  for (const c of casesInCell) {
+    const t = getRationaleTone(c)
+    if (TONE_RANK[t] > TONE_RANK[best]) best = t
+  }
+  return best
+}
+
+function filterCasesForExportMatrixCell(
+  all: HQACase[],
+  vtype: string,
+  event: string,
+  component: string
+): HQACase[] {
+  return all.filter((c) => {
+    const vtMatch = vtype === "全て" || c.vehicle_type === vtype
+    return vtMatch && matchEvent(c, event) && matchComponent(c, component)
+  })
+}
+
 export const DTC_RATIONALE_HEADERS = [
   "No",
   "市技報No",
@@ -158,7 +199,12 @@ export const EXPORT_MATRIX_VTYPES = ["全て", "大型", "中型"] as const
 
 export type ExportMatrixSection = {
   vtype: string
-  rows: { event: string; counts: number[]; rowTotal: number }[]
+  rows: {
+    event: string
+    counts: number[]
+    rowTotal: number
+    cellTones: RationaleTone[]
+  }[]
   colTotals: number[]
   grandTotal: number
 }
@@ -173,11 +219,14 @@ export function buildExportMatrixSections(cases: HQACase[]): ExportMatrixSection
           return vtMatch && matchEvent(c, event) && matchComponent(c, comp)
         }).length
       )
+      const cellTones = EXPORT_MATRIX_COMPONENTS.map((comp) =>
+        aggregateCellTone(filterCasesForExportMatrixCell(cases, vtype, event, comp))
+      )
       counts.forEach((v, ci) => {
         colTotals[ci] += v
       })
       const rowTotal = counts.reduce((s, v) => s + v, 0)
-      return { event, counts, rowTotal }
+      return { event, counts, rowTotal, cellTones }
     })
     const grandTotal = colTotals.reduce((s, v) => s + v, 0)
     return { vtype, rows, colTotals, grandTotal }

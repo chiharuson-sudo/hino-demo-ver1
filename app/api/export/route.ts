@@ -6,10 +6,25 @@ import {
   DTC_RATIONALE_HEADERS,
   EXPORT_MATRIX_COMPONENTS,
   EXPORT_MATRIX_EVENTS,
+  getRationaleTone,
+  type RationaleTone,
 } from "@/lib/dtc-export-rationale"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
+
+function excelFillForTone(t: RationaleTone): { argb: string } | null {
+  switch (t) {
+    case "new":
+      return { argb: "FFFECACA" }
+    case "narrowed":
+      return { argb: "FFFFE0B2" }
+    case "low":
+      return { argb: "FFFFF9C4" }
+    default:
+      return null
+  }
+}
 
 export async function GET() {
   const cases = getAllCasesSortedByNo()
@@ -106,24 +121,16 @@ export async function GET() {
       r.counts.forEach((cnt, ci) => {
         const cell = row.getCell(ci + 2)
         cell.alignment = { horizontal: "center" }
-        if (cnt >= 5)
+        if (cnt < 1) return
+        const tone = r.cellTones[ci]
+        const fill = excelFillForTone(tone)
+        if (fill) {
           cell.fill = {
             type: "pattern",
             pattern: "solid",
-            fgColor: { argb: "FFFFCC80" },
+            fgColor: fill,
           }
-        else if (cnt >= 3)
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFFFE0B2" },
-          }
-        else if (cnt >= 1)
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFFFF3E0" },
-          }
+        }
       })
     })
 
