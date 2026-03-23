@@ -4,6 +4,7 @@
 
 import type { HQACase } from "./case-database"
 import { matchComponent, matchEvent } from "./case-database"
+import { extractDTCs } from "./hqa-knowledge"
 import { COMPONENT_COLS, EVENT_ROWS } from "./stats-data"
 
 export type DtcSelection = {
@@ -13,10 +14,116 @@ export type DtcSelection = {
   confidence: string
 }
 
+/** 市技報で dtc_codes が空でも、本文から代表DTCを無理やり付与する（エクスポート・根拠表示用） */
+export function inferPrimaryDtcWhenNoCodes(c: HQACase): DtcSelection {
+  const full = [
+    c.symptom,
+    c.inspection,
+    c.analysis,
+    c.repair,
+    c.diag_raw,
+    c.component,
+  ].join("\n")
+
+  const normalized = full
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) =>
+      String.fromCharCode(s.charCodeAt(0) - 0xfee0)
+    )
+    .toUpperCase()
+
+  const fromBook = extractDTCs(full)
+  if (fromBook.length > 0) {
+    return {
+      selected: fromBook[0],
+      reason: "症状・確認結果・解析・ダイアグ記述から整備解説書登録DTCを検出",
+      rule: "テキスト推定ルール",
+      confidence: "中",
+    }
+  }
+
+  const freqCodes = [
+    "2B0402",
+    "2C0402",
+    "160405",
+    "150405",
+    "2A0408",
+    "2B0400",
+    "160404",
+    "150404",
+    "2C0404",
+    "7F0530",
+    "7E0201",
+    "7F1160",
+  ]
+  const re = /\b([0-9A-F]{5,6})\b/gi
+  const seen = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = re.exec(normalized)) !== null) {
+    seen.add(m[1].toUpperCase())
+  }
+  if (seen.size > 0) {
+    const pick =
+      freqCodes.find((code) => seen.has(code)) ?? [...seen][0]!
+    return {
+      selected: pick,
+      reason: `診断文にコード「${pick}」の記載を検出`,
+      rule: "テキスト推定ルール",
+      confidence: "中",
+    }
+  }
+
+  if (/2A0408|赤警告|赤.*ランプ|全停止.*ABS|ABS.*VSC|VSC.*全停止/.test(normalized)) {
+    return {
+      selected: "2A0408",
+      reason: "赤警告・全停止系の記述から推定",
+      rule: "テキスト推定ルール",
+      confidence: "中",
+    }
+  }
+  if (/2B0402/.test(normalized)) {
+    return {
+      selected: "2B0402",
+      reason: "記述に2B0402を検出",
+      rule: "テキスト推定ルール",
+      confidence: "中",
+    }
+  }
+  if (/2C0402/.test(normalized)) {
+    return {
+      selected: "2C0402",
+      reason: "記述に2C0402を検出",
+      rule: "テキスト推定ルール",
+      confidence: "中",
+    }
+  }
+  if (/BST|ブレーキシグナル|トランスミッター|ブレーキ.*シグナル/.test(normalized)) {
+    return {
+      selected: "2B0402",
+      reason: "BST/ブレーキシグナル系の記述が中心のため代表DTCを付与",
+      rule: "テキスト推定ルール",
+      confidence: "低",
+    }
+  }
+  if (/EBS|ABS|異常点灯|ランプ点灯|ウォーニング|インフォメーション|ダイアグ/.test(normalized)) {
+    return {
+      selected: "2B0402",
+      reason: "EBS/ABS系警告の記述に基づき、当データで最多の2B0402を仮置き",
+      rule: "テキスト推定ルール",
+      confidence: "低",
+    }
+  }
+
+  return {
+    selected: "2B0402",
+    reason: "DTC記載なしのため当データセットで最多の2B0402を仮置き（参考用）",
+    rule: "テキスト推定ルール",
+    confidence: "低",
+  }
+}
+
 export function selectPrimaryDTC(c: HQACase): DtcSelection {
   const dtcs = c.dtc_codes
-  if (dtcs.length === 0)
-    return { selected: "", reason: "DTCなし", rule: "-", confidence: "低" }
+  if (dtcs.length === 0) return inferPrimaryDtcWhenNoCodes(c)
   if (dtcs.length === 1)
     return {
       selected: dtcs[0],
@@ -99,7 +206,12 @@ export type RationaleTone = "new" | "narrowed" | "low" | "neutral"
 
 export function getRationaleTone(c: HQACase): RationaleTone {
   const sel = selectPrimaryDTC(c)
-  if (c.dtc_codes.length === 0) return "new"
+  if (c.dtc_codes.length === 0) {
+    if (sel.rule === "テキスト推定ルール") {
+      return sel.confidence === "低" ? "low" : "neutral"
+    }
+    return "new"
+  }
   if (c.dtc_codes.length > 1) return "narrowed"
   if (sel.confidence === "低") return "low"
   return "neutral"
