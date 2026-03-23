@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useMemo } from "react"
+import Link from "next/link"
 import { Download, ExternalLink, Loader2, TrendingUp } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -280,26 +281,44 @@ export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatri
                     {"高（相対）"}
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  onClick={handleExport}
-                  disabled={exporting}
-                  variant="outline"
-                  size="sm"
-                  className="border-[#D30515] text-[#D30515] hover:bg-[#D30515] hover:text-white"
-                >
-                  {exporting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {"生成中..."}
-                    </>
-                  ) : (
-                    <>
-                      <Download className="mr-2 h-4 w-4" />
-                      {"DTC振り分け根拠をエクスポート"}
-                    </>
-                  )}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-border text-card-foreground hover:bg-muted"
+                    asChild
+                  >
+                    <Link
+                      href="/dtc-export-rationale"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      {"根拠を別タブで表示"}
+                    </Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleExport}
+                    disabled={exporting}
+                    variant="outline"
+                    size="sm"
+                    className="border-[#D30515] text-[#D30515] hover:bg-[#D30515] hover:text-white"
+                  >
+                    {exporting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {"生成中..."}
+                      </>
+                    ) : (
+                      <>
+                        <Download className="mr-2 h-4 w-4" />
+                        {"DTC振り分け根拠をエクスポート"}
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
 
