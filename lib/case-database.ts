@@ -3,7 +3,12 @@
 // データ：public/data/hqa_cases.json（HQA_CASES は hqa-knowledge で定義）
 // ============================================================
 
-import { HQA_CASES, type HQACase } from "./hqa-knowledge"
+import {
+  HQA_CASES,
+  classifyComponentFromText,
+  classifyEventFromText,
+  type HQACase,
+} from "./hqa-knowledge"
 
 export type { HQACase }
 
@@ -98,39 +103,19 @@ export function getDTCStats(dtcCode: string) {
   }
 }
 
-function matchEvent(c: HQACase, event: string): boolean {
-  const t = `${c.symptom} ${c.inspection}`.toLowerCase()
-  switch (event) {
-    case "警告灯点灯":
-      return /ランプ点灯|警告灯|ebs点灯|abs点灯|ウォーニング|異常表示/.test(t)
-    case "走行不能":
-      return /走行不能|自走不可/.test(t)
-    case "異音・振動":
-      return /異音|振動/.test(t)
-    case "通信異常":
-      return /通信|can/.test(t)
-    case "性能低下":
-      return /効き不良|性能/.test(t)
-    default:
-      return false
-  }
+/** Excelマトリクス・エクスポート用：事象が該当列か（classifyEventFromText と一致） */
+export function matchEvent(c: HQACase, event: string): boolean {
+  return classifyEventFromText(c.symptom, c.inspection) === event
 }
 
-function matchComponent(c: HQACase, component: string): boolean {
-  const t = `${c.component} ${c.repair} ${c.analysis}`
-  const bst = /bst|ブレーキシグナル|トランスミッター/i.test(t)
-  const ecu = /ecu/i.test(t)
-  const harness = /ハーネス|配線|コネクター/.test(t)
-  switch (component) {
-    case "制動装置（BST）":
-      return bst && !ecu
-    case "EBS ECU":
-      return ecu
-    case "ハーネス・コネクター":
-      return harness
-    case "その他":
-      return !bst && !ecu && !harness
-    default:
-      return false
-  }
+/** Excelマトリクス・エクスポート用：部品が該当列か（classifyComponentFromText と一致） */
+export function matchComponent(c: HQACase, component: string): boolean {
+  return (
+    classifyComponentFromText(
+      c.component,
+      c.repair,
+      c.analysis,
+      c.symptom
+    ) === component
+  )
 }

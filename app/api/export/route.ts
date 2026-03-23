@@ -141,10 +141,12 @@ export async function GET() {
 
     ws.columns = [
       { width: 14 },
-      { width: 18 },
-      { width: 10 },
-      { width: 20 },
-      { width: 10 },
+      { width: 11 },
+      { width: 11 },
+      { width: 11 },
+      { width: 11 },
+      { width: 11 },
+      { width: 11 },
       { width: 8 },
     ]
   })

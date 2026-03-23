@@ -3,44 +3,40 @@
 // ============================================================
 
 export type EventCategory =
-  | "異音"
-  | "作動不良"
   | "警告灯点灯"
-  | "破損"
-  | "油脂漏れ"
+  | "走行不能"
+  | "異音・振動"
   | "通信異常"
-  | "プログラム不具合"
+  | "性能低下"
 
 export type ComponentCategory =
   | "エンジン"
-  | "BSD"
-  | "ドライブトレイン"
-  | "制動装置"
-  | "電子制御"
-  | "ソフトウェア/制御"
+  | "ドライブトレーン"
+  | "電子電装"
+  | "シャシ"
+  | "ボデー"
+  | "ソフトウェア"
 
 export type MatrixVehicleFilter = "全て" | "大型" | "中型" | "小型"
 
 export const EVENT_ROWS: EventCategory[] = [
-  "異音",
-  "作動不良",
   "警告灯点灯",
-  "破損",
-  "油脂漏れ",
+  "走行不能",
+  "異音・振動",
   "通信異常",
-  "プログラム不具合",
+  "性能低下",
 ]
 
 export const COMPONENT_COLS: ComponentCategory[] = [
   "エンジン",
-  "BSD",
-  "ドライブトレイン",
-  "制動装置",
-  "電子制御",
-  "ソフトウェア/制御",
+  "ドライブトレーン",
+  "電子電装",
+  "シャシ",
+  "ボデー",
+  "ソフトウェア",
 ]
 
-export const TRENDING_COMPONENT: ComponentCategory = "ソフトウェア/制御"
+export const TRENDING_COMPONENT: ComponentCategory = "ソフトウェア"
 
 /** エクスポート用：振り分け根拠サンプル行 */
 export interface TriageExportRow {
@@ -78,7 +74,7 @@ export const TRIAGE_EXPORT_ROWS: TriageExportRow[] = [
     routing_group: "【EBS・ブレーキグループ】",
     priority: "高",
     event_category: "警告灯点灯",
-    fault_component: "制動装置（BST）",
+    fault_component: "電子電装",
   },
   {
     no: 2,
@@ -95,7 +91,7 @@ export const TRIAGE_EXPORT_ROWS: TriageExportRow[] = [
     routing_group: "【EBS・ブレーキグループ】",
     priority: "中",
     event_category: "警告灯点灯",
-    fault_component: "制動装置（BST）",
+    fault_component: "電子電装",
   },
   {
     no: 3,
@@ -112,7 +108,7 @@ export const TRIAGE_EXPORT_ROWS: TriageExportRow[] = [
     routing_group: "【ソフトウェア・電子制御グループ】",
     priority: "中",
     event_category: "通信異常",
-    fault_component: "制御ソフトウェア",
+    fault_component: "ソフトウェア",
   },
   {
     no: 4,
@@ -128,8 +124,8 @@ export const TRIAGE_EXPORT_ROWS: TriageExportRow[] = [
     confidence: "高",
     routing_group: "【ソフトウェア・電子制御グループ】",
     priority: "高",
-    event_category: "プログラム不具合",
-    fault_component: "制御ソフトウェア",
+    event_category: "通信異常",
+    fault_component: "ソフトウェア",
   },
   {
     no: 5,
@@ -145,7 +141,7 @@ export const TRIAGE_EXPORT_ROWS: TriageExportRow[] = [
     confidence: "低",
     routing_group: "【エンジングループ】",
     priority: "低",
-    event_category: "異音",
+    event_category: "異音・振動",
     fault_component: "エンジン",
   },
 ]

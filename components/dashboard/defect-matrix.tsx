@@ -100,15 +100,15 @@ function mapHighlightEvent(raw?: string): EventCategory | undefined {
   if (!raw) return undefined
   const t = raw.trim()
   if (EVENT_ROWS.includes(t as EventCategory)) return t as EventCategory
-  if (t.includes("プログラム")) return "プログラム不具合"
+  if (t.includes("プログラム")) return "通信異常"
   if (t.includes("通信")) return "通信異常"
-  if (t.includes("油脂") || t.includes("漏れ")) return "油脂漏れ"
-  if (t.includes("破損")) return "破損"
-  if (t.includes("異音") || t.includes("振動")) return "異音"
-  if (t.includes("作動")) return "作動不良"
+  if (t.includes("油脂") || t.includes("漏れ")) return "性能低下"
+  if (t.includes("破損")) return "警告灯点灯"
+  if (t.includes("異音") || t.includes("振動")) return "異音・振動"
+  if (t.includes("走行不能") || t.includes("自走不可")) return "走行不能"
+  if (t.includes("作動不良") || t.includes("作動")) return "走行不能"
   if (t.includes("警告灯") || t.includes("点灯")) return "警告灯点灯"
-  if (t.includes("走行不能")) return "作動不良"
-  if (t.includes("性能")) return "油脂漏れ"
+  if (t.includes("性能")) return "性能低下"
   return undefined
 }
 
@@ -116,15 +116,16 @@ function mapHighlightComponent(raw?: string): ComponentCategory | undefined {
   if (!raw) return undefined
   const t = raw.toLowerCase()
   if (t.includes("ソフト") || t.includes("制御ソフト") || t.includes("プログラム"))
-    return "ソフトウェア/制御"
+    return "ソフトウェア"
   if (t.includes("bsd") || t.includes("bst") || t.includes("ブレーキシグナル"))
-    return "BSD"
-  if (t.includes("ドライブ") || t.includes("トレイン") || t.includes("変速"))
-    return "ドライブトレイン"
-  if (t.includes("制動") || t.includes("ブレーキ") || t.includes("ebs") || t.includes("abs"))
-    return "制動装置"
+    return "電子電装"
+  if (t.includes("ドライブ") || t.includes("トレーン") || t.includes("トレイン") || t.includes("変速"))
+    return "ドライブトレーン"
+  if (t.includes("シャシ") || t.includes("制動") || t.includes("ブレーキ") || t.includes("ebs") || t.includes("abs"))
+    return "シャシ"
   if (t.includes("電子") || t.includes("ecu") || t.includes("電装"))
-    return "電子制御"
+    return "電子電装"
+  if (t.includes("ボデ") || t.includes("ボディ")) return "ボデー"
   if (t.includes("エンジン")) return "エンジン"
   return undefined
 }
@@ -404,7 +405,7 @@ export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatri
                       (s, c) => s + cellCount(matrix, filter, event, c),
                       0
                     )
-                    const isNewRow = event === "通信異常" || event === "プログラム不具合"
+                    const isNewRow = event === "通信異常"
                     const isRowHi = rowHi === event
                     return (
                       <TableRow

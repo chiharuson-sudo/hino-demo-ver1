@@ -106,45 +106,58 @@ function simulateTriageAnalysis(text: string): TriageResult {
     lowerText.includes("プログラム") &&
     (lowerText.includes("不具合") || lowerText.includes("異常") || lowerText.includes("エラー"))
   ) {
-    eventType = "プログラム不具合"
+    eventType = "通信異常"
   } else if (lowerText.includes("異音") || lowerText.includes("振動")) {
-    eventType = "異音"
+    eventType = "異音・振動"
   } else if (lowerText.includes("走行不能") || lowerText.includes("走れない")) {
-    eventType = "作動不良"
+    eventType = "走行不能"
   } else if (lowerText.includes("性能") || lowerText.includes("出力低下")) {
-    eventType = "油脂漏れ"
+    eventType = "性能低下"
   } else if (lowerText.includes("作動不良") || lowerText.includes("作動")) {
-    eventType = "作動不良"
+    eventType = "走行不能"
   } else if (lowerText.includes("破損") || lowerText.includes("割れ") || lowerText.includes("壊")) {
-    eventType = "破損"
+    eventType = "警告灯点灯"
   } else if (lowerText.includes("漏れ") || lowerText.includes("油脂") || lowerText.includes("オイル")) {
-    eventType = "油脂漏れ"
+    eventType = "性能低下"
   }
 
   let component = "エンジン"
   let engineeringGroup = "エンジングループ"
 
   if (isSoftwareIssue) {
-    component = "制御ソフトウェア"
+    component = "ソフトウェア"
     engineeringGroup = "ソフトウェア・電子制御グループ"
   } else if (lowerText.includes("bsd") || lowerText.includes("ブラインドスポット")) {
-    component = "EBS ECU"
+    component = "電子電装"
     engineeringGroup = "EBS・ブレーキグループ"
-  } else if (lowerText.includes("ドライブトレイン") || lowerText.includes("トランスミッション") || lowerText.includes("変速")) {
-    component = "ドライブトレイン"
+  } else if (
+    lowerText.includes("ドライブトレーン") ||
+    lowerText.includes("トランスミッション") ||
+    lowerText.includes("変速")
+  ) {
+    component = "ドライブトレーン"
     engineeringGroup = "駆動グループ"
-  } else if (lowerText.includes("制動") || lowerText.includes("ブレーキ") || lowerText.includes("ebs") || lowerText.includes("abs")) {
-    component = "制動装置（BST）"
+  } else if (
+    lowerText.includes("制動") ||
+    lowerText.includes("ブレーキ") ||
+    lowerText.includes("ebs") ||
+    lowerText.includes("abs")
+  ) {
+    component = "電子電装"
     engineeringGroup = "EBS・ブレーキグループ"
-  } else if (lowerText.includes("電子制御") || lowerText.includes("ecu") || lowerText.includes("コンピュータ")) {
-    component = "電子制御"
+  } else if (
+    lowerText.includes("電子制御") ||
+    lowerText.includes("ecu") ||
+    lowerText.includes("コンピュータ")
+  ) {
+    component = "電子電装"
     engineeringGroup = "電装グループ"
   }
 
   let confidence = 65
   const keywords = [
     "大型", "中型", "小型", "エンジン", "bsd", "制動", "ブレーキ",
-    "異音", "作動不良", "警告灯", "破損", "漏れ", "ドライブトレイン", "電子制御",
+    "異音", "作動不良", "警告灯", "破損", "漏れ", "ドライブトレーン", "電子制御",
     ...SOFTWARE_KEYWORDS,
   ]
   const matchCount = keywords.filter((kw) => lowerText.includes(kw)).length
@@ -155,7 +168,7 @@ function simulateTriageAnalysis(text: string): TriageResult {
 
   const hwSwDetermination = "記述内容から、原因がハードウェア起因かソフトウェア起因かを判定しました。"
   const softwareNote = isSoftwareIssue
-    ? "ソフトウェア関連キーワードを検出したため、「制御ソフトウェア」に分類しました。"
+    ? "ソフトウェア関連キーワードを検出したため、「ソフトウェア」に分類しました。"
     : `今回はハードウェア起因と判定し、物理部品「${component}」に分類しました。`
 
   const reasoning = `まず、記述内容から車両サイズを「${vehicleCategory}」と特定しました。${hwSwDetermination} 次に、「${eventType}」という事象（現象）に着目し、関連する部品として「${component}」を推定しました。${softwareNote} この事象パターンと部品の組み合わせから、担当エンジニアリンググループは「${engineeringGroup}」が最適と判断しました。`

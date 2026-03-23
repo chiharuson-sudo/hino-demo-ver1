@@ -3,6 +3,8 @@
 // ============================================================
 
 import type { HQACase } from "./case-database"
+import { matchComponent, matchEvent } from "./case-database"
+import { COMPONENT_COLS, EVENT_ROWS } from "./stats-data"
 
 export type DtcSelection = {
   selected: string
@@ -92,32 +94,6 @@ export function getPriority(dtc: string): string {
   return dtc === "2A0408" ? "高" : dtc ? "中" : "低"
 }
 
-export function matchEvent(c: HQACase, event: string): boolean {
-  const t = `${c.symptom} ${c.inspection}`
-  const map: Record<string, RegExp> = {
-    警告灯点灯: /ランプ点灯|警告灯|EBS点灯|ABS点灯|ウォーニング|異常表示/,
-    走行不能: /走行不能|自走不可/,
-    "異音・振動": /異音|振動/,
-    通信異常: /通信|CAN/i,
-    性能低下: /効き不良|性能/,
-  }
-  return map[event]?.test(t) ?? false
-}
-
-export function matchComponent(c: HQACase, component: string): boolean {
-  const t = `${c.component} ${c.repair} ${c.analysis}`
-  const bst = /BST|ブレーキシグナル|トランスミッター/i.test(t)
-  const ecu = /ECU/i.test(t)
-  const harness = /ハーネス|配線|コネクター/.test(t)
-  if (component === "その他") return !bst && !ecu && !harness
-  const map: Record<string, RegExp> = {
-    "制動装置（BST）": /BST|ブレーキシグナル|トランスミッター/i,
-    "EBS ECU": /ECU/i,
-    "ハーネス・コネクター": /ハーネス|配線|コネクター/,
-  }
-  return map[component]?.test(t) ?? false
-}
-
 export const DTC_RATIONALE_HEADERS = [
   "No",
   "市技報No",
@@ -174,20 +150,9 @@ export function buildRationaleRowCells(c: HQACase): {
   return { cells, sel }
 }
 
-export const EXPORT_MATRIX_EVENTS = [
-  "警告灯点灯",
-  "走行不能",
-  "異音・振動",
-  "通信異常",
-  "性能低下",
-] as const
+export const EXPORT_MATRIX_EVENTS = EVENT_ROWS
 
-export const EXPORT_MATRIX_COMPONENTS = [
-  "制動装置（BST）",
-  "EBS ECU",
-  "ハーネス・コネクター",
-  "その他",
-] as const
+export const EXPORT_MATRIX_COMPONENTS = COMPONENT_COLS
 
 export const EXPORT_MATRIX_VTYPES = ["全て", "大型", "中型"] as const
 

@@ -93,6 +93,28 @@ export function ResultPanel({ result, isAnalyzing }: ResultPanelProps) {
               {"選択DTC: " + result.selectedDtc}
             </Badge>
           ) : null}
+          {result.dtcCodes !== undefined && result.dtcCodes.length === 0 ? (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="border-gray-300 text-muted-foreground">
+                {"DTC未検出"}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                {"症状テキストから部品分類を推定"}
+              </span>
+            </div>
+          ) : result.dtcCodes && result.dtcCodes.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {result.dtcCodes.map((dtc) => (
+                <Badge
+                  key={dtc}
+                  variant="outline"
+                  className="font-mono text-[10px] font-semibold text-[#D30515]"
+                >
+                  {dtc}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
           <Badge className="gap-1.5 bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground">
             <Truck className="h-3.5 w-3.5" />
             {"#車両型: " + result.vehicleCategory}
@@ -124,7 +146,7 @@ export function ResultPanel({ result, isAnalyzing }: ResultPanelProps) {
           <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2">
             <Cpu className="h-4 w-4 shrink-0 text-violet-600" />
             <p className="text-xs font-medium text-violet-800">
-              {"ソフトウェア/制御系不具合を検出 — 【ソフトウェア・電子制御グループ】への転送を推奨"}
+              {"ソフトウェア系不具合を検出 — 【ソフトウェア・電子制御グループ】への転送を推奨"}
             </p>
           </div>
         )}
