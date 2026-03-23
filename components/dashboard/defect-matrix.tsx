@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { Download, ExternalLink, Loader2, TrendingUp } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -27,12 +27,14 @@ import {
   type ComponentCategory,
   type EventCategory,
   type MatrixVehicleFilter,
-  getCellCount,
-  getMatrixTotal,
-  getSoftwareControlTotal,
 } from "@/lib/stats-data"
 
 const VEHICLE_FILTERS: MatrixVehicleFilter[] = ["全て", "大型", "中型", "小型"]
+
+type MatrixPayload = Record<
+  MatrixVehicleFilter,
+  Record<EventCategory, Record<ComponentCategory, number>>
+>
 
 interface InquiryRecord {
   id: string
@@ -43,15 +45,53 @@ interface InquiryRecord {
   date: string
 }
 
-function heatClass(value: number, isSoftwareCol: boolean): string {
+function cellCount(
+  matrix: MatrixPayload | null,
+  filter: MatrixVehicleFilter,
+  event: EventCategory,
+  component: ComponentCategory
+): number {
+  if (!matrix) return 0
+  return matrix[filter]?.[event]?.[component] ?? 0
+}
+
+function matrixTotalLocal(matrix: MatrixPayload | null, filter: MatrixVehicleFilter): number {
+  if (!matrix) return 0
+  let s = 0
+  for (const ev of EVENT_ROWS) {
+    for (const comp of COMPONENT_COLS) {
+      s += cellCount(matrix, filter, ev, comp)
+    }
+  }
+  return s
+}
+
+function softwareTotalLocal(matrix: MatrixPayload | null, filter: MatrixVehicleFilter): number {
+  if (!matrix) return 0
+  let s = 0
+  for (const ev of EVENT_ROWS) {
+    s += cellCount(matrix, filter, ev, TRENDING_COMPONENT)
+  }
+  return s
+}
+
+function heatClass(
+  value: number,
+  isSoftwareCol: boolean,
+  maxRegular: number,
+  maxSw: number
+): string {
   if (value === 0) return "bg-white text-muted-foreground"
+  const max = isSoftwareCol ? maxSw : maxRegular
+  const denom = max > 0 ? max : value
+  const r = value / denom
   if (isSoftwareCol) {
-    if (value <= 2) return "bg-[#F3E5F5] text-violet-950 font-medium"
-    if (value <= 4) return "bg-[#E1BEE7] text-violet-950 font-semibold"
+    if (r <= 1 / 3) return "bg-[#F3E5F5] text-violet-950 font-medium"
+    if (r <= 2 / 3) return "bg-[#E1BEE7] text-violet-950 font-semibold"
     return "bg-[#CE93D8] text-violet-950 font-bold"
   }
-  if (value <= 2) return "bg-[#FFF3E0] text-amber-950 font-medium"
-  if (value <= 4) return "bg-[#FFE0B2] text-orange-950 font-semibold"
+  if (r <= 1 / 3) return "bg-[#FFF3E0] text-amber-950 font-medium"
+  if (r <= 2 / 3) return "bg-[#FFE0B2] text-orange-950 font-semibold"
   return "bg-[#FFCC80] text-orange-950 font-bold"
 }
 
@@ -88,36 +128,6 @@ function mapHighlightComponent(raw?: string): ComponentCategory | undefined {
   return undefined
 }
 
-function makeDrillRecords(
-  event: EventCategory,
-  component: ComponentCategory,
-  count: number,
-  filter: MatrixVehicleFilter
-): InquiryRecord[] {
-  const n = Math.min(count, 40)
-  const mix = (["大型", "大型", "中型", "小型"] as const)
-  const cat: "大型" | "中型" | "小型" =
-    filter === "全て"
-      ? mix[0]!
-      : filter === "中型"
-        ? "中型"
-        : filter === "小型"
-          ? "小型"
-          : "大型"
-  const dtcPool = ["2B0402", "2C0402", "2A0408", "160405", "7F0530"]
-  return Array.from({ length: n }, (_, i) => {
-    const vcat = filter === "全て" ? mix[i % mix.length]! : cat
-    return {
-      id: `INQ-${event.slice(0, 1)}${component.slice(0, 1)}-${String(i + 1).padStart(3, "0")}`,
-      chassisNumber: `${vcat === "中型" ? "HNMD" : vcat === "小型" ? "HNSM" : "HNTF"}-${Math.floor(10000 + Math.random() * 90000)}`,
-      dtcCode: dtcPool[i % dtcPool.length],
-      status: (["新規", "調査中", "対策済", "保留"] as const)[i % 4],
-      vehicleCategory: vcat,
-      date: "2026-02-15",
-    }
-  })
-}
-
 export interface DefectMatrixProps {
   highlightEvent?: string
   highlightComponent?: string
@@ -125,29 +135,80 @@ export interface DefectMatrixProps {
 
 export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatrixProps) {
   const [filter, setFilter] = useState<MatrixVehicleFilter>("全て")
+  const [matrix, setMatrix] = useState<MatrixPayload | null>(null)
+  const [matrixLoading, setMatrixLoading] = useState(true)
+  const [matrixError, setMatrixError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [cellRecordsLoading, setCellRecordsLoading] = useState(false)
   const [selectedCell, setSelectedCell] = useState<{
     event: EventCategory
     component: ComponentCategory
     records: InquiryRecord[]
   } | null>(null)
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setMatrixLoading(true)
+      setMatrixError(null)
+      try {
+        const res = await fetch("/api/matrix-data")
+        if (!res.ok) throw new Error("load failed")
+        const data = (await res.json()) as { matrix: MatrixPayload }
+        if (!cancelled) setMatrix(data.matrix)
+      } catch {
+        if (!cancelled) setMatrixError("市技報データからマトリクスを読み込めませんでした")
+      } finally {
+        if (!cancelled) setMatrixLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const rowHi = mapHighlightEvent(highlightEvent)
   const colHi = mapHighlightComponent(highlightComponent)
 
-  const total = getMatrixTotal(filter)
-  const swTotal = getSoftwareControlTotal(filter)
+  const { maxRegular, maxSw } = useMemo(() => {
+    if (!matrix) return { maxRegular: 0, maxSw: 0 }
+    let mr = 0
+    let ms = 0
+    for (const ev of EVENT_ROWS) {
+      for (const comp of COMPONENT_COLS) {
+        const v = cellCount(matrix, filter, ev, comp)
+        if (comp === TRENDING_COMPONENT) ms = Math.max(ms, v)
+        else mr = Math.max(mr, v)
+      }
+    }
+    return { maxRegular: mr, maxSw: ms }
+  }, [matrix, filter])
 
-  const handleCellClick = (event: EventCategory, component: ComponentCategory) => {
-    const count = getCellCount(filter, event, component)
-    if (count === 0) return
-    setSelectedCell({
-      event,
-      component,
-      records: makeDrillRecords(event, component, count, filter),
-    })
+  const total = matrixTotalLocal(matrix, filter)
+  const swTotal = softwareTotalLocal(matrix, filter)
+
+  const handleCellClick = async (event: EventCategory, component: ComponentCategory) => {
+    const count = cellCount(matrix, filter, event, component)
+    if (count === 0 || !matrix) return
+    setSelectedCell({ event, component, records: [] })
     setDialogOpen(true)
+    setCellRecordsLoading(true)
+    try {
+      const params = new URLSearchParams({
+        filter,
+        event,
+        component,
+      })
+      const res = await fetch(`/api/matrix-cell?${params.toString()}`)
+      if (!res.ok) throw new Error("cell failed")
+      const data = (await res.json()) as { records: InquiryRecord[] }
+      setSelectedCell({ event, component, records: data.records })
+    } catch {
+      setSelectedCell({ event, component, records: [] })
+    } finally {
+      setCellRecordsLoading(false)
+    }
   }
 
   const handleExport = useCallback(async () => {
@@ -196,7 +257,7 @@ export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatri
                   {"本日の不具合マトリクス"}
                 </CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {"事象（行）× 部品（列）— セルをクリックして詳細を表示"}
+                  {"事象（行）× 部品（列）— 市技報データを集計。セルをクリックして該当事例を表示"}
                 </p>
               </div>
               <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -212,11 +273,11 @@ export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatri
                     <span className="inline-block h-2.5 w-2.5 rounded-sm border border-border bg-white" />
                     {"0"}
                     <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#FFF3E0] ring-1 ring-orange-200" />
-                    {"1-2"}
+                    {"低"}
                     <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#FFE0B2] ring-1 ring-orange-300" />
-                    {"3-4"}
+                    {"中"}
                     <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#FFCC80] ring-1 ring-orange-400" />
-                    {"5+"}
+                    {"高（相対）"}
                   </div>
                 </div>
                 <Button
@@ -271,133 +332,149 @@ export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatri
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border">
-                  <TableHead className="min-w-[130px] text-xs font-semibold text-muted-foreground">
-                    {"事象 \\ 部品"}
-                  </TableHead>
-                  {COMPONENT_COLS.map((comp) => {
-                    const isSw = comp === TRENDING_COMPONENT
-                    const isHi = colHi === comp
-                    return (
-                      <TableHead
-                        key={comp}
-                        className={`text-center text-xs font-semibold ${
-                          isHi ? "text-[#D30515]" : isSw ? "text-violet-800" : "text-muted-foreground"
-                        }`}
-                      >
-                        <div className="flex items-center justify-center gap-1">
-                          {comp}
-                          {isSw && (
-                            <span className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-800">
-                              <TrendingUp className="h-3 w-3 shrink-0" />
-                              <span className="tabular-nums">{swTotal}</span>
-                            </span>
-                          )}
-                        </div>
-                      </TableHead>
-                    )
-                  })}
-                  <TableHead className="text-center text-xs font-semibold text-muted-foreground">
-                    {"計"}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {EVENT_ROWS.map((event) => {
-                  const rowTotal = COMPONENT_COLS.reduce(
-                    (s, c) => s + getCellCount(filter, event, c),
-                    0
-                  )
-                  const isNewRow = event === "通信異常" || event === "プログラム不具合"
-                  const isRowHi = rowHi === event
-                  return (
-                    <TableRow
-                      key={event}
-                      className={`border-border ${isRowHi ? "bg-red-50/50" : ""}`}
-                    >
-                      <TableCell
-                        className={`text-xs font-medium ${
-                          isRowHi ? "font-semibold text-[#D30515]" : "text-card-foreground"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          {event}
-                          {isNewRow && (
-                            <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold leading-none text-violet-700">
-                              {"NEW"}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      {COMPONENT_COLS.map((comp) => {
-                        const value = getCellCount(filter, event, comp)
-                        const isSw = comp === TRENDING_COMPONENT
-                        const isCellHi = rowHi === event && colHi === comp
-                        return (
-                          <TableCell key={comp} className="p-0 text-center text-xs">
-                            <button
-                              type="button"
-                              disabled={value === 0}
-                              onClick={() => handleCellClick(event, comp)}
-                              className={`flex h-full min-h-[40px] w-full items-center justify-center px-2 py-2 transition-all ${heatClass(
-                                value,
-                                isSw
-                              )} ${
-                                value > 0
-                                  ? "cursor-pointer hover:ring-2 hover:ring-[#D30515]/40 hover:ring-offset-1"
-                                  : "cursor-default"
-                              } ${isCellHi ? "ring-2 ring-[#D30515] ring-offset-1" : ""}`}
-                              title={
-                                value > 0
-                                  ? `${event} × ${comp}: ${value}件`
-                                  : undefined
-                              }
-                            >
-                              {value === 0 ? "0" : value.toLocaleString()}
-                            </button>
-                          </TableCell>
-                        )
-                      })}
-                      <TableCell className="text-center text-xs font-semibold text-card-foreground">
-                        {rowTotal.toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-                <TableRow className="border-border bg-muted/50">
-                  <TableCell className="text-xs font-bold text-card-foreground">
-                    {"計"}
-                  </TableCell>
-                  {COMPONENT_COLS.map((comp) => {
-                    const colTotal = EVENT_ROWS.reduce(
-                      (s, ev) => s + getCellCount(filter, ev, comp),
+          {matrixError && (
+            <p className="mb-3 text-sm text-destructive">{matrixError}</p>
+          )}
+          {matrixLoading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              {"読み込み中..."}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border">
+                    <TableHead className="min-w-[130px] text-xs font-semibold text-muted-foreground">
+                      {"事象 \\ 部品"}
+                    </TableHead>
+                    {COMPONENT_COLS.map((comp) => {
+                      const isSw = comp === TRENDING_COMPONENT
+                      const isHi = colHi === comp
+                      return (
+                        <TableHead
+                          key={comp}
+                          className={`text-center text-xs font-semibold ${
+                            isHi
+                              ? "text-[#D30515]"
+                              : isSw
+                                ? "text-violet-800"
+                                : "text-muted-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            {comp}
+                            {isSw && (
+                              <span className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-800">
+                                <TrendingUp className="h-3 w-3 shrink-0" />
+                                <span className="tabular-nums">{swTotal}</span>
+                              </span>
+                            )}
+                          </div>
+                        </TableHead>
+                      )
+                    })}
+                    <TableHead className="text-center text-xs font-semibold text-muted-foreground">
+                      {"計"}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {EVENT_ROWS.map((event) => {
+                    const rowTotal = COMPONENT_COLS.reduce(
+                      (s, c) => s + cellCount(matrix, filter, event, c),
                       0
                     )
-                    const isSw = comp === TRENDING_COMPONENT
+                    const isNewRow = event === "通信異常" || event === "プログラム不具合"
+                    const isRowHi = rowHi === event
                     return (
-                      <TableCell
-                        key={comp}
-                        className={`text-center text-xs font-bold ${
-                          isSw ? "text-violet-900" : "text-card-foreground"
-                        }`}
+                      <TableRow
+                        key={event}
+                        className={`border-border ${isRowHi ? "bg-red-50/50" : ""}`}
                       >
-                        <div className="flex items-center justify-center gap-1">
-                          {colTotal.toLocaleString()}
-                          {isSw && <TrendingUp className="h-3 w-3 text-violet-600" />}
-                        </div>
-                      </TableCell>
+                        <TableCell
+                          className={`text-xs font-medium ${
+                            isRowHi ? "font-semibold text-[#D30515]" : "text-card-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            {event}
+                            {isNewRow && (
+                              <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold leading-none text-violet-700">
+                                {"NEW"}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        {COMPONENT_COLS.map((comp) => {
+                          const value = cellCount(matrix, filter, event, comp)
+                          const isSw = comp === TRENDING_COMPONENT
+                          const isCellHi = rowHi === event && colHi === comp
+                          return (
+                            <TableCell key={comp} className="p-0 text-center text-xs">
+                              <button
+                                type="button"
+                                disabled={value === 0}
+                                onClick={() => handleCellClick(event, comp)}
+                                className={`flex h-full min-h-[40px] w-full items-center justify-center px-2 py-2 transition-all ${heatClass(
+                                  value,
+                                  isSw,
+                                  maxRegular,
+                                  maxSw
+                                )} ${
+                                  value > 0
+                                    ? "cursor-pointer hover:ring-2 hover:ring-[#D30515]/40 hover:ring-offset-1"
+                                    : "cursor-default"
+                                } ${isCellHi ? "ring-2 ring-[#D30515] ring-offset-1" : ""}`}
+                                title={
+                                  value > 0
+                                    ? `${event} × ${comp}: ${value}件`
+                                    : undefined
+                                }
+                              >
+                                {value === 0 ? "0" : value.toLocaleString()}
+                              </button>
+                            </TableCell>
+                          )
+                        })}
+                        <TableCell className="text-center text-xs font-semibold text-card-foreground">
+                          {rowTotal.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
                     )
                   })}
-                  <TableCell className="text-center text-xs font-bold text-[#D30515]">
-                    {total.toLocaleString()}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </div>
+                  <TableRow className="border-border bg-muted/50">
+                    <TableCell className="text-xs font-bold text-card-foreground">
+                      {"計"}
+                    </TableCell>
+                    {COMPONENT_COLS.map((comp) => {
+                      const colTotal = EVENT_ROWS.reduce(
+                        (s, ev) => s + cellCount(matrix, filter, ev, comp),
+                        0
+                      )
+                      const isSw = comp === TRENDING_COMPONENT
+                      return (
+                        <TableCell
+                          key={comp}
+                          className={`text-center text-xs font-bold ${
+                            isSw ? "text-violet-900" : "text-card-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            {colTotal.toLocaleString()}
+                            {isSw && <TrendingUp className="h-3 w-3 text-violet-600" />}
+                          </div>
+                        </TableCell>
+                      )
+                    })}
+                    <TableCell className="text-center text-xs font-bold text-[#D30515]">
+                      {total.toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -428,12 +505,17 @@ export function DefectMatrix({ highlightEvent, highlightComponent }: DefectMatri
             </DialogTitle>
             <DialogDescription className="text-xs">
               {filter !== "全て"
-                ? `${filter}向け表示 — ${selectedCell?.records.length ?? 0}件（サンプル）`
-                : `全車両 — ${selectedCell?.records.length ?? 0}件（サンプル）`}
+                ? `${filter}向け — 市技報の該当セル ${selectedCell?.records.length ?? 0} 件`
+                : `全車両 — 市技報の該当セル ${selectedCell?.records.length ?? 0} 件`}
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-auto">
-            {selectedCell && selectedCell.records.length > 0 ? (
+            {cellRecordsLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                {"読み込み中..."}
+              </div>
+            ) : selectedCell && selectedCell.records.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow className="border-border">
