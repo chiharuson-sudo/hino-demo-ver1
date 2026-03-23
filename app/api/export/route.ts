@@ -13,14 +13,15 @@ import {
 export const runtime = "nodejs"
 export const maxDuration = 300
 
+/** HTML（Tailwind）のトーンに揃えた塗り（ARGB: AARRGGBB） */
 function excelFillForTone(t: RationaleTone): { argb: string } | null {
   switch (t) {
     case "new":
-      return { argb: "FFFECACA" }
+      return { argb: "FFFEE2E2" }
     case "narrowed":
-      return { argb: "FFFFE0B2" }
+      return { argb: "FFFFEDD5" }
     case "low":
-      return { argb: "FFFFF9C4" }
+      return { argb: "FFFEF9C3" }
     case "inferred":
       return { argb: "FFE0F2FE" }
     default:
@@ -48,35 +49,19 @@ export async function GET() {
   headerRow.height = 20
 
   cases.forEach((c, idx) => {
-    const { cells, sel } = buildRationaleRowCells(c)
+    const { cells } = buildRationaleRowCells(c)
     ws1.addRow(cells)
     const row = ws1.getRow(idx + 2)
-
-    if (sel.confidence === "低") {
-      row.eachCell((cell, colNumber) => {
-        if (colNumber !== 13) {
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFFFFDE7" },
-          }
+    const tone = getRationaleTone(c)
+    const fill = excelFillForTone(tone)
+    if (fill) {
+      row.eachCell((cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: fill,
         }
       })
-    }
-
-    const dtcCell = row.getCell(13)
-    if (sel.selected === "2A0408") {
-      dtcCell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFFFE0E0" },
-      }
-    } else if (sel.selected) {
-      dtcCell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFFFF3E0" },
-      }
     }
   })
 
